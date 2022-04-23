@@ -6,10 +6,11 @@
 #var_dump($history);
 
 class RakutenBalance {
-    const RAKUTEN_URL_LOGIN   = 'https://fes.rakuten-bank.co.jp/MS/main/RbS?CurrentPageID=START&&COMMAND=LOGIN';
-    const RAKUTEN_URL_AUTH    = 'https://fes.rakuten-bank.co.jp/MS/main/fcs/rb/fes/jsp/mainservice/Security/LoginAuthentication/Login/Login.jsp';
+    const RAKUTEN_URL_LOGIN   = 'https://fes.rakuten-bank.co.jp/MS/main/RbS?COMMAND=LOGIN&&CurrentPageID=START_ACCOUNT_PLUS';
+    const RAKUTEN_URL_AUTH    = 'https://fes.rakuten-bank.co.jp/MS/main/fcs/rb/fes/jsp/mainservice/AccountPlus/Security/Login/Login.jsp';
+    const RAKUTEN_URL_ACCOUNT = 'https://fes.rakuten-bank.co.jp/MS/main/fcs/rb/fes/jsp/mainservice/AccountPlus/Menu/AccountSelected/AccountSelected.jsp';
     const RAKUTEN_URL_MYPAGE  = 'https://fes.rakuten-bank.co.jp/MS/main/gns?COMMAND=BALANCE_INQUIRY_START&&CurrentPageID=HEADER_FOOTER_LINK';
-    const RAKUTEN_URL_HISOTRY = 'https://fes.rakuten-bank.co.jp/MS/main/fcs/rb/fes/jsp/mainservice/Inquiry/BalanceInquiry/BalanceInquiry/BalanceInquiry.jsp';
+    const RAKUTEN_URL_HISOTRY = 'https://fes.rakuten-bank.co.jp/MS/main/fcs/rb/fes/jsp/mainservice/AccountPlus/Menu/ServiceSelected/CsServiceSelectedMenu.jsp';
 
     private $login_id     = null;
     private $login_pass   = null;
@@ -18,14 +19,16 @@ class RakutenBalance {
     private $jsf_sequence = null;
     private $balance      = null;
 
-    public function __construct($id, $pass) {
-        $this->login_id   = $id;
-        $this->login_pass = $pass;
+    public function __construct($group, $id, $pass) {
+        $this->login_group = $group;
+        $this->login_id    = $id;
+        $this->login_pass  = $pass;
     }
     public function getHistory() {
         $this->login();
         $this->auth();
-        $this->mypage();
+        $this->account();
+        //$this->mypage();
         return $this->history();
     }
     public function getBalance() {
@@ -36,13 +39,19 @@ class RakutenBalance {
     }
 
     private function loadURL($url, $params = []) {
-        $stream_context = [];
+        $stream_context = [
+            'http' => array(
+                'method' => 'GET',
+                'header' => 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.10; rv:39.0) Gecko/20100101 Firefox/39.0',
+            ),
+        ];
         if ($params) {
             $params = http_build_query($params, '', '&');
             $stream_context = array('http' =>
                 array(
                     'method'  => 'POST',
                     'header'  => implode("\r\n", array(
+                        'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.10; rv:39.0) Gecko/20100101 Firefox/39.0',
                         'Content-Type: application/x-www-form-urlencoded',
                         'Content-Length: ' . strlen($params),
                         'Cookie: ' . $this->cookie,
@@ -55,6 +64,7 @@ class RakutenBalance {
                 array(
                     'method'  => 'GET',
                     'header'  => implode("\r\n", array(
+                        'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.10; rv:39.0) Gecko/20100101 Firefox/39.0',
                         'Cookie: ' . $this->cookie,
                     )),
                 )
@@ -88,6 +98,7 @@ class RakutenBalance {
     }
     private function auth() {
         $html = $this->loadURL(self::RAKUTEN_URL_AUTH, array(
+            'LOGIN:ACCOUNTGROUP_ID' => $this->login_group,
             'LOGIN:LOGIN_PASSWORD'  => $this->login_pass,
             'LOGIN:USER_ID'         => $this->login_id,
             $this->jsp_id           => '',
@@ -95,9 +106,28 @@ class RakutenBalance {
             'LOGIN_SUBMIT'          => 1,
             'jsf_sequence'          => 1,
         ));
-        if (!strpos($html, 'しばらくお待ちください')) {
+        if (!strpos($html, '利用可能口座')) {
             throw new Exception('Faild to authenticate');
         }
+    }
+    private function account() {
+        $html = $this->loadURL(self::RAKUTEN_URL_ACCOUNT, array(
+            'ACCOUNT_SELECTED_FORM:_idJsp98:0:_idJsp121' => '',
+            'ACCOUNT_SELECTED_FORM:_link_hidden_'        => '',
+            'ACCOUNT_SELECTED_FORM_SUBMIT'               => 1,
+            'jsf_sequence'                               => $this->jsf_sequence,
+        ));
+        if (!strpos($html, 'サービス選択')) {
+            throw new Exception('Faild to authenticate2');
+        }
+        if (!preg_match('$id="(FORM:_idJsp[0-9]+)">入出金明細</a>$', $html, $match)) {
+            throw new Exception('Faild to get jsp id');
+        }
+        $this->jsp_id = $match[1];
+        if (!preg_match('$<input type="hidden" name="jsf_sequence" value="([0-9]+)" />$', $html, $match)) {
+            throw new Exception('Faild to get jsf sequence');
+        }
+        $this->jsf_sequence = $match[1];
     }
     private function mypage() {
         $html = $this->loadURL(self::RAKUTEN_URL_MYPAGE);
